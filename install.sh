@@ -125,12 +125,13 @@ pgrep -f 'org.apache.hadoop.yarn.server.resourcemanager.ResourceManager' >/dev/n
 
 log "Installing the WordCount web dashboard..."
 mkdir -p "$APP_DIR"
-SCRIPT_SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
-if [[ -n "$SCRIPT_SOURCE_DIR" && -f "$SCRIPT_SOURCE_DIR/webapp.py" ]]; then
-  cp "$SCRIPT_SOURCE_DIR/webapp.py" "$APP_DIR/webapp.py"
-else
-  die "webapp.py must be in the same downloaded package as install.sh. Download and extract the complete hadoop-auto-web.zip, then run ./install.sh."
-fi
+log "Downloading WordCount web application from GitHub..."
+
+WEBAPP_URL="https://raw.githubusercontent.com/ragav2730/hadoop-auto/main/webapp.py"
+
+curl -fL --retry 3 "$WEBAPP_URL" -o "$APP_DIR/webapp.py"
+
+python3 -m py_compile "$APP_DIR/webapp.py" || die "Invalid web application file."
 cat > "$APP_DIR/start-dashboard.sh" <<EOF
 #!/usr/bin/env bash
 export JAVA_HOME="$JAVA_HOME"
