@@ -1,3 +1,67 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+HADOOP_VERSION="2.7.0"
+HADOOP_ARCHIVE="hadoop-${HADOOP_VERSION}.tar.gz"
+HADOOP_URL="https://archive.apache.org/dist/hadoop/common/hadoop-${HADOOP_VERSION}/${HADOOP_ARCHIVE}"
+HADOOP_HOME="${HADOOP_HOME:-$HOME/hadoop-${HADOOP_VERSION}}"
+DATA_HOME="${HADOOP_DATA_HOME:-$HOME/hadoopdata/hdfs}"
+
+log() { printf '\n\033[1;34m[HADOOP-AUTO]\033[0m %s\n' "$*"; }
+die() { printf '\n\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
+trap 'die "Installation stopped at line $LINENO. Review the message above; no NameNode format was forced."' ERR
+
+[[ "$(uname -s)" == Linux ]] || die "This installer supports Ubuntu/Linux only."
+command -v apt-get >/dev/null 2>&1 || die "apt-get was not found. This script is intended for Ubuntu/Debian-based lab PCs."
+
+log "Checking administrator access..."
+if [[ "$EUID" -eq 0 ]]; then
+  die "Do not run this script with sudo. Run it as your normal Ubuntu user; it will request sudo only when required."
+fi
+command -v sudo >/dev/null 2>&1 || die "sudo is not installed. Ask your lab administrator to install it."
+sudo -v || die "Administrator permission was denied. Ask your lab administrator for sudo access."
+
+log "Updating package information..."
+sudo apt-get update
+
+# Hadoop 2.7.0 in this lab manual is configured for Java 8.
+if command -v java >/dev/null 2>&1; then
+  JAVA_BIN="$(readlink -f "$(command -v java)")"
+  JAVA_MAJOR="$("$JAVA_BIN" -version 2>&1 | awk -F '[".]' '/version/ { if ($2 == "1") print $3; else print $2; exit }')"
+else
+  JAVA_MAJOR=""
+fi
+if [[ "$JAVA_MAJOR" != "8" ]]; then
+  log "Java 8 is required by this Hadoop 2.7.0 lab setup."
+  if apt-cache show openjdk-8-jdk >/dev/null 2>&1; then
+    sudo apt-get install -y openjdk-8-jdk
+  else
+    die "Java 8 is not installed and openjdk-8-jdk is unavailable in this Ubuntu release's configured repositories. Ask the lab administrator to provide a Java 8 JDK or enable an approved repository; this installer will not silently substitute a different Java version."
+  fi
+fi
+JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
+[[ -x "$JAVA_HOME/bin/java" ]] || die "Could not locate a complete JDK at JAVA_HOME=$JAVA_HOME."
+
+log "Checking OpenSSH server..."
+if ! dpkg-query -W -f='${Status}' openssh-server 2>/dev/null | grep -q 'install ok installed'; then
+  sudo apt-get install -y openssh-server
+fi
+sudo systemctl enable ssh
+sudo systemctl start ssh
+
+log "Configuring passwordless localhost SSH..."
+install -d -m 700 "$HOME/.ssh"
+if [[ ! -f "$HOME/.ssh/id_rsa" ]]; then
+  ssh-keygen -q -t rsa -b 3072 -N '' -f "$HOME/.ssh/id_rsa"
+fi
+touch "$HOME/.ssh/authorized_keys"
+chmod 600 "$HOME/.ssh/authorized_keys"
+if ! grep -qxF "$(cat "$HOME/.ssh/id_rsa.pub")" "$HOME/.ssh/authorized_keys"; then
+  cat "$HOME/.ssh/id_rsa.pub" >> "$HOME/.ssh/authorized_keys"
+fi
+touch "$HOME/.ssh/known_hosts"
+ssh-keyscan -H localhost 127.0.0.1 2>/dev/null >> "$HOME/.ssh/known_hosts" || true
+
 log "Locating or downloading Hadoop ${HADOOP_VERSION}..."
 if [[ ! -d "$HADOOP_HOME" ]]; then
   # Reuse a matching existing extraction before downloading.
